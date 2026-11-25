@@ -12,7 +12,10 @@ import sys
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fleet_exercises import EXERCISES, ExerciseRun
-from fleet_report import render, render_exercise, render_exercise_index
+from fleet_report import (
+    EXERCISE_SUMMARY_FIELDS, render, render_exercise, render_exercise_index,
+    render_exercise_summary,
+)
 from fleet_simulator import END, FAULTS, SCENARIOS, SITE, START, TARGET, SimulatedFleet
 
 
@@ -305,9 +308,19 @@ def exercise(args):
             "scenario": name, "title": spec.title,
             "passed": validation["passed"], "failed": validation["failed"],
             "jobs_completed": sum(job["final_state"] == "completed" for job in metrics),
+            "jobs_submitted": len(metrics),
+            "max_queue_seconds": max((job["queue_seconds"] for job in metrics
+                                      if job["queue_seconds"] is not None), default=None),
+            "max_reassignment_seconds": max((job["reassignment_seconds"] for job in metrics
+                                             if job["reassignment_seconds"] is not None), default=None),
             "report": f"{name}/report.html",
         })
     (output / "index.html").write_text(render_exercise_index(results), encoding="utf-8")
+    (output / "summary.md").write_text(render_exercise_summary(results), encoding="utf-8")
+    with (output / "summary.csv").open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(header for header, _ in EXERCISE_SUMMARY_FIELDS)
+        writer.writerows([row[key] for _, key in EXERCISE_SUMMARY_FIELDS] for row in results)
     report = {"scenarios": results, "passed": sum(row["passed"] for row in results),
               "failed": sum(row["failed"] for row in results), "index": str(output / "index.html")}
     write_json(output / "summary.json", report)

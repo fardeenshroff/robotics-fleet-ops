@@ -1,6 +1,6 @@
 """Deterministic dispatch exercises based on documented fleet operating cases."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 from fleet_simulator import SITE, START
@@ -39,6 +39,8 @@ class Job:
     interrupted_at: int | None = None
     resumed_at: int | None = None
     completed_at: int | None = None
+    active_wait_reason: str | None = None
+    wait_reasons: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -197,19 +199,42 @@ class ExerciseRun:
             self.last_seen[subject] = now
             self.log(now, subject, "Zone C", "INFO", "STATION_STATUS_RECEIVED")
 
+    def wait(self, now, job, reason):
+        if job.active_wait_reason == reason:
+            return
+        job.active_wait_reason = reason
+        if reason not in job.wait_reasons:
+            job.wait_reasons.append(reason)
+        self.log(now, "FLEET-CONTROL", job.request.routes[0], "INFO", "JOB_WAITING",
+                 job.request.id, reason.replace("_", " ").capitalize())
+
     def dispatch(self, now, job, busy):
         request = job.request
         if request.station is not None:
             last_seen = self.last_seen.get(request.station)
             if last_seen is None or now - last_seen > STATION_MAX_AGE:
+                self.wait(now, job, "destination_status_stale")
                 return
         route = next((zone for zone in request.routes if zone not in self.closed), None)
-        robot = next((candidate for candidate in request.candidates
-                      if candidate not in busy and self.robots[candidate].online
-                      and not self.robots[candidate].charging
-                      and self.robots[candidate].battery >= MIN_DISPATCH_BATTERY), None)
-        if route is None or robot is None:
+        if route is None:
+            self.wait(now, job, "no_open_approved_route")
             return
+        eligible = [
+            candidate for candidate in request.candidates
+            if self.robots[candidate].online and not self.robots[candidate].charging
+            and self.robots[candidate].battery >= MIN_DISPATCH_BATTERY
+        ]
+        robot = next((candidate for candidate in eligible if candidate not in busy), None)
+        if robot is None:
+            reason = "no_ready_robot"
+            if eligible:
+                reason = "eligible_robots_busy"
+            elif any(self.robots[candidate].online and self.robots[candidate].charging
+                     for candidate in request.candidates):
+                reason = "waiting_for_charger_release"
+            self.wait(now, job, reason)
+            return
+        job.active_wait_reason = None
         job.state, job.robot, job.route = "running", robot, route
         job.finish_at = now + request.service
         if job.first_start is None:
@@ -265,7 +290,7 @@ class ExerciseRun:
     def metrics(self):
         return [{
             "job_id": job.request.id, "final_state": job.state,
-            "assigned_device": job.robot, "route": job.route,
+            "assigned_device": job.robot, "route": job.route, "wait_reasons": job.wait_reasons,
             "queue_seconds": (job.first_start - job.request.arrival
                               if job.first_start is not None else None),
             "reassignment_seconds": (job.resumed_at - job.interrupted_at

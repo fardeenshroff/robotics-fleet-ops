@@ -142,13 +142,40 @@ def exercise_page(title, description, sections):
 """
 
 
+EXERCISE_SUMMARY_FIELDS = (
+    ("Scenario", "scenario"),
+    ("Passed", "passed"),
+    ("Failed", "failed"),
+    ("Jobs completed", "jobs_completed"),
+    ("Jobs submitted", "jobs_submitted"),
+    ("Longest queue (s)", "max_queue_seconds"),
+    ("Longest reassignment (s)", "max_reassignment_seconds"),
+)
+
+
+def render_exercise_summary(results):
+    headers = [header for header, _ in EXERCISE_SUMMARY_FIELDS]
+    rows = [headers, ["---"] + ["---:"] * (len(headers) - 1)]
+    rows.extend([row[key] if row[key] is not None else "—"
+                 for _, key in EXERCISE_SUMMARY_FIELDS] for row in results)
+    return "# Fleet exercise results\n\n" + "\n".join(
+        "| " + " | ".join(map(str, row)) + " |" for row in rows
+    ) + "\n"
+
+
 def render_exercise_index(results):
-    return exercise_page("Fleet disruption exercises", "Synthetic warehouse operations replay", "".join(
-        f'<section><h2><a href="{escape(row["report"], quote=True)}">{escape(row["title"])}</a></h2>'
-        f'<p>{row["passed"]} checks passed, {row["failed"]} failed. '
-        f'{row["jobs_completed"]} jobs completed.</p></section>'
+    headers = tuple(header for header, _ in EXERCISE_SUMMARY_FIELDS)
+    rows = ([row[key] if row[key] is not None else "—"
+             for _, key in EXERCISE_SUMMARY_FIELDS] for row in results)
+    links = "".join(
+        f'<li><a href="{escape(row["report"], quote=True)}">{escape(row["title"])}</a></li>'
         for row in results
-    ))
+    )
+    return exercise_page("Fleet disruption exercises", "Synthetic warehouse operations replay", f"""
+<section><h2>Suite results</h2>{table(headers, rows)}
+<p><a href="summary.csv">Download the summary CSV</a></p></section>
+<section><h2>Scenario reports</h2><ul>{links}</ul></section>
+""")
 
 
 def render_exercise(spec, events, validation, metrics, start):
@@ -158,10 +185,11 @@ def render_exercise(spec, events, validation, metrics, start):
         for row in events
     ))
     jobs = table(("Job", "Final state", "Robot", "Route", "Queue wait (s)",
-                  "Reassignment (s)", "Time to complete (s)"), (
+                  "Reassignment (s)", "Time to complete (s)", "Reasons queued"), (
         (job["job_id"], job["final_state"], job["assigned_device"] or "—", job["route"] or "—",
          *[job[key] if job[key] is not None else "—"
-           for key in ("queue_seconds", "reassignment_seconds", "elapsed_seconds")])
+           for key in ("queue_seconds", "reassignment_seconds", "elapsed_seconds")],
+         ", ".join(reason.replace("_", " ") for reason in job["wait_reasons"]) or "—")
         for job in metrics
     ))
     completed = [job for job in metrics if job["elapsed_seconds"] is not None]

@@ -41,9 +41,8 @@ jobs:
               for name in ("baseline", "regression"):
                   data = json.loads(Path(f"reports/{name}/validation.json").read_text(encoding="utf-8"))
                   print(f"| {name.title()} | {data['passed']} | {data['failed']} |", file=summary)
-              suite = json.loads(Path("reports/exercises/summary.json").read_text(encoding="utf-8"))
-              for run in suite["scenarios"]:
-                  print(f"| {run['title']} | {run['passed']} | {run['failed']} |", file=summary)
+              print(file=summary)
+              print(Path("reports/exercises/summary.md").read_text(encoding="utf-8"), file=summary)
           PY
       - name: Upload fleet reports
         if: matrix.python-version == '3.12'

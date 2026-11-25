@@ -7,7 +7,7 @@ python fleet_ops.py exercise --output reports/fleet-exercises
 python fleet_ops.py exercise --scenario mid-job-offline --output reports/disconnect-only
 ```
 
-Open `reports/fleet-exercises/index.html` for the full suite, or open an individual scenario's `report.html`. Each scenario exports `events.csv`, `plan.json`, `evidence.json`, `validation.json`, and `job-metrics.json`. The CLI uses all scenarios by default and returns `1` if any checkpoint fails. The output directory must be new.
+Open `reports/fleet-exercises/index.html` for the full suite, or open an individual scenario's `report.html`. The suite exports the same results in CSV, JSON, and Markdown. See the [recorded example](example-exercise-summary.md) for the expected durations and check counts. Each scenario exports `events.csv`, `plan.json`, `evidence.json`, `validation.json`, and `job-metrics.json`. The CLI uses all scenarios by default and returns `1` if any checkpoint fails. The output directory must be new.
 
 | Scenario | Operating reference | Behavior checked |
 | --- | --- | --- |
@@ -22,6 +22,7 @@ Open `reports/fleet-exercises/index.html` for the full suite, or open an individ
 - **Queue wait** is the time from job arrival to its first dispatch.
 - **Reassignment time** is the time from interruption to the next dispatch of that job.
 - **Time to complete** is the total elapsed time from arrival to completion.
+- **Queue reasons** explain which constraint prevented dispatch, such as a closed route, stale destination status, or a busy eligible robot. The timeline records each change in reason.
 - **Checkpoint outcomes** compare fixed expectations with the simulated state at specified times. To rerun validation independently, use `python fleet_ops.py validate --plan PATH/plan.json --evidence PATH/evidence.json`.
 
 The simulator treats routes as approved zone choices and uses fixed service durations. It does not model vehicle movement, physical obstacles, stopping distances, battery chemistry, or live fleet integration. The demo station freshness limit is a local simulation policy. VDA 5050 is referenced for robot state and connection reporting. The pre-pickup retry assumes independent confirmation of the load state. Loaded or ambiguous jobs would require a different recovery exercise.

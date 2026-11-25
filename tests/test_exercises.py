@@ -27,6 +27,14 @@ class ExerciseTests(unittest.TestCase):
             index = (output / "index.html").read_text(encoding="utf-8")
             metrics = {}
             events = {}
+            with (output / "summary.csv").open(newline="", encoding="utf-8") as file:
+                suite_rows = {row["Scenario"]: row for row in csv.DictReader(file)}
+            self.assertEqual(suite_rows["mid-job-offline"]["Longest reassignment (s)"], "45")
+            self.assertEqual(suite_rows["low-battery"]["Longest queue (s)"], "420")
+            self.assertEqual(suite_rows["low-battery"]["Longest reassignment (s)"], "")
+            published_example = PROJECT / "docs" / "example-exercise-summary.md"
+            self.assertEqual((output / "summary.md").read_text(encoding="utf-8"),
+                             published_example.read_text(encoding="utf-8"))
             for row in summary["scenarios"]:
                 name = row["scenario"]
                 path = output / name
@@ -55,6 +63,17 @@ class ExerciseTests(unittest.TestCase):
             self.assertEqual(metrics["low-battery"]["JOB-721"]["queue_seconds"], 420)
             self.assertEqual(metrics["stale-workstation"]["JOB-731"]["queue_seconds"], 45)
             self.assertEqual(metrics["dispatch-contention"]["JOB-742"]["queue_seconds"], 50)
+            waits_to_check = (
+                ("blocked-aisle", "JOB-711", "no_open_approved_route"),
+                ("low-battery", "JOB-721", "waiting_for_charger_release"),
+                ("stale-workstation", "JOB-731", "destination_status_stale"),
+                ("dispatch-contention", "JOB-742", "eligible_robots_busy"),
+            )
+            for scenario, job, reason in waits_to_check:
+                self.assertEqual(metrics[scenario][job]["wait_reasons"], [reason])
+                waiting = [event for event in events[scenario]
+                           if event["code"] == "JOB_WAITING" and event["job_id"] == job]
+                self.assertEqual(len(waiting), 1)
             self.run_cli(2, "exercise", "--output", output)
             self.assertEqual((output / "index.html").read_text(encoding="utf-8"), index)
 
