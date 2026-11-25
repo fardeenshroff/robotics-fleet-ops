@@ -1,7 +1,7 @@
 """Render the latest simulated diagnostics and release results as standalone HTML."""
 
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from html import escape
 
 
@@ -51,7 +51,9 @@ def bar(label, segments, scale):
             f'<div class="track" aria-hidden="true">{widths}</div><span>{summary}</span></div>')
 
 
-def incident_chart(timeline, target, start, end):
+def incident_chart(timeline, target, start, end, zone):
+    start = start.astimezone(timezone.utc)
+    end = end.astimezone(timezone.utc)
     lanes = sorted({event["device_id"] for event in timeline} - {target})
     duration = (end - start).total_seconds()
     rows = []
@@ -69,7 +71,9 @@ def incident_chart(timeline, target, start, end):
                 )
         rows.append(f'<div class="timeline-row"><strong>{escape(device)}</strong>'
                     f'<div class="timeline-track">{"".join(markers)}</div></div>')
-    ticks = "".join(f"<span>{start + (end - start) * (step / 6):%H:%M}</span>" for step in range(7))
+    tick_times = [(start + (end - start) * (step / 6)).astimezone(zone) for step in range(7)]
+    tick_format = "%H:%M %Z" if len({tick.utcoffset() for tick in tick_times}) > 1 else "%H:%M"
+    ticks = "".join(f"<span>{escape(tick.strftime(tick_format))}</span>" for tick in tick_times)
     axis = f'<div class="axis-row"><span></span><div>{ticks}</div></div>'
     return f'<div aria-hidden="true">{"".join(rows)}{axis}</div>'
 
@@ -82,7 +86,7 @@ def describe_difference(diff):
     return f"{diff['field']}: {diff['expected']!r} → {diff['observed']!r}"
 
 
-def render(scenario, diagnostics, release, shift):
+def render(scenario, diagnostics, release, shift, zone=timezone.utc):
     labels = {"firmware": "Firmware", "registration": "Registration",
               "assignment": "Job assignment", "onboarding": "Onboarding"}
     statuses = Counter((case["kind"], case["status"]) for case in release["cases"])
@@ -96,14 +100,13 @@ def render(scenario, diagnostics, release, shift):
         bar(zone, [("faults", count, "count")], shift["fault_count"])
         for zone, count in shift["faults_by_zone"].items()
     )
-    central = timezone(timedelta(hours=-6))
-    start = datetime.fromisoformat(shift["start_inclusive"]).astimezone(central)
-    end = datetime.fromisoformat(shift["end_exclusive"]).astimezone(central)
+    start = datetime.fromisoformat(shift["start_inclusive"]).astimezone(zone)
+    end = datetime.fromisoformat(shift["end_exclusive"]).astimezone(zone)
     timeline = sorted(diagnostics["timeline"] + diagnostics["peer_faults"],
                       key=lambda event: datetime.fromisoformat(event["timestamp"]))
-    incident = incident_chart(timeline, diagnostics["device_id"], start, end)
-    events = table(("CST", "Device", "Zone", "Event", "Job"), (
-        (datetime.fromisoformat(row["timestamp"]).astimezone(central).strftime("%H:%M:%S"),
+    incident = incident_chart(timeline, diagnostics["device_id"], start, end, zone)
+    events = table(("Local time", "Device", "Zone", "Event", "Job"), (
+        (datetime.fromisoformat(row["timestamp"]).astimezone(zone).strftime("%H:%M:%S %Z"),
          row["device_id"], row["zone"], row["code"], row["job_id"] or "—")
         for row in timeline
     ))
@@ -122,8 +125,8 @@ def render(scenario, diagnostics, release, shift):
 <div><strong>{len(diagnostics['peer_faults'])}</strong>Matching peer events</div>
 <div><strong>{release['passed']}</strong>Checks passed</div>
 <div><strong>{release['failed']}</strong>Checks failed</div></section>
-<section><h2>Fleet faults by zone</h2><p>{shift['event_count']} events and {shift['fault_count']} faults at this site on {start:%B %d, %Y}, from {start:%H:%M} to {end:%H:%M} CST.</p>{fault_chart}</section>
-<section><h2>Diagnostic timeline</h2><p>{escape(diagnostics['device_id'])} events and matching same-zone faults on peer robots. Red diamonds mark faults. Blue circles mark information events.</p>{incident}{events}</section>
+<section><h2>Fleet faults by zone</h2><p>{shift['event_count']} events and {shift['fault_count']} faults at this site from {escape(start.strftime("%b %d, %Y %H:%M %Z"))} to {escape(end.strftime("%b %d, %Y %H:%M %Z"))}.</p>{fault_chart}</section>
+<section><h2>Diagnostic timeline</h2><p>{escape(diagnostics['device_id'])} events and same-code faults in the same zone within {diagnostics["peer_window_seconds"] / 60:g} minutes of a target fault. Red diamonds mark faults. Blue circles mark information events.</p>{incident}{events}</section>
 <section><h2>Release validation by area</h2>{release_chart}</section>
 <section><h2>Case results</h2>{results}</section></main></body></html>
 """

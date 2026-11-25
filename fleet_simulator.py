@@ -8,6 +8,8 @@ SITE = "RI-01"
 TARGET = "AMR-205"
 START = datetime(2026, 11, 25, 14, tzinfo=timezone.utc)
 END = START + timedelta(hours=1)
+FAULTS = ("firmware_not_applied", "dispatch_ignores_status", "workstation_no_telemetry")
+SCENARIOS = {"baseline": frozenset(), "regression": frozenset(FAULTS)}
 
 
 @dataclass
@@ -21,8 +23,8 @@ class Device:
 
 
 class SimulatedFleet:
-    def __init__(self, scenario):
-        self.regression = scenario == "regression"
+    def __init__(self, faults):
+        self.faults = faults
         self.devices = {}
         self.assignments = {}
         self.events = []
@@ -41,7 +43,7 @@ class SimulatedFleet:
     def update_firmware(self, device_id, target_version):
         device = self.devices[device_id]
         device.online = False
-        if not self.regression:
+        if "firmware_not_applied" not in self.faults:
             device.version = target_version
         device.online = True
         return {"device_id": device_id, "version": device.version,
@@ -53,7 +55,7 @@ class SimulatedFleet:
             device_id for device_id in candidates
             if self.devices[device_id].kind == "robot"
             and self.devices[device_id].site == site
-            and (self.devices[device_id].online or self.regression)
+            and (self.devices[device_id].online or "dispatch_ignores_status" in self.faults)
         ), None)
         self.assignments[job_id] = assigned
         return {"job_id": job_id, "state": "assigned" if assigned else "queued",
@@ -75,7 +77,7 @@ class SimulatedFleet:
         device = self.devices[device_id]
         device.monitoring = device.online
         device.telemetry = device.monitoring and not (
-            self.regression and device.kind == "workstation"
+            "workstation_no_telemetry" in self.faults and device.kind == "workstation"
         )
         return {"device_id": device_id, "device_type": device.kind,
                 "visible_in_monitoring": device.monitoring,

@@ -19,3 +19,32 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m unittest discover -s tests -v
+      - name: Generate fleet reports and job summary
+        if: matrix.python-version == '3.12'
+        run: |
+          python fleet_ops.py simulate --scenario baseline --output reports/baseline
+          status=0
+          python fleet_ops.py simulate --scenario regression --output reports/regression || status=$?
+          if [ "$status" -ne 1 ]; then
+            echo "Expected the seeded regression to exit 1, got $status" >&2
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+              print("## Fleet simulation results\n", file=summary)
+              print("| Scenario | Passed | Failed |\n| --- | ---: | ---: |", file=summary)
+              for name in ("baseline", "regression"):
+                  data = json.loads(Path(f"reports/{name}/validation.json").read_text(encoding="utf-8"))
+                  print(f"| {name.title()} | {data['passed']} | {data['failed']} |", file=summary)
+          PY
+      - name: Upload fleet reports
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: fleet-reports
+          path: reports/
+          if-no-files-found: error

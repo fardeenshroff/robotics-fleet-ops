@@ -1,20 +1,25 @@
 """Analyze exported fleet logs and compare observed results with a release plan."""
 
 import argparse
+from bisect import bisect_left
 import csv
-from collections import Counter
-from datetime import datetime, timezone
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+import re
 import sys
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fleet_report import render
-from fleet_simulator import END, SITE, START, TARGET, SimulatedFleet
+from fleet_simulator import END, FAULTS, SCENARIOS, SITE, START, TARGET, SimulatedFleet
 
 
 EVENT_FIELDS = ("timestamp", "device_id", "site", "zone", "severity",
                 "code", "job_id", "message")
 FAULT_LEVELS = {"ERROR", "CRITICAL"}
+PEER_WINDOW = timedelta(minutes=15)
+CLOCK_SKEW = timedelta(minutes=1)
 
 
 def timestamp(value):
@@ -23,9 +28,35 @@ def timestamp(value):
         if parsed.tzinfo is None or parsed.utcoffset() is None:
             raise ValueError
         return parsed.astimezone(timezone.utc)
-    except ValueError:
+    except (ValueError, OverflowError):
         raise argparse.ArgumentTypeError(
             f"Expected an ISO 8601 timestamp with a UTC offset, got {value!r}"
+        ) from None
+
+
+def duration(value):
+    match = re.fullmatch(r"([0-9]+)([smhd])", value)
+    if match:
+        amount, unit = match.groups()
+        try:
+            seconds = int(amount) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+            if seconds > 0:
+                return timedelta(seconds=seconds)
+        except (ValueError, OverflowError):
+            pass
+    raise argparse.ArgumentTypeError(
+        f"Expected a positive duration like 90s, 15m, 2h or 1d, got {value!r}"
+    )
+
+
+def reporting_zone(value):
+    if value == "UTC":
+        return timezone.utc
+    try:
+        return ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise argparse.ArgumentTypeError(
+            f"Unknown time zone {value!r}. Use an IANA zone with time-zone data installed, or UTC."
         ) from None
 
 
@@ -63,14 +94,31 @@ def site_events(path, site, start, end):
             if start <= instant < end and row["site"] == site]
 
 
+def find_peer_faults(events, faults, device, window):
+    target_times = defaultdict(list)
+    for row in faults:
+        target_times[row["zone"], row["code"]].append(timestamp(row["timestamp"]))
+    nearby = []
+    for row in events:
+        if row["device_id"] == device or row["severity"] not in FAULT_LEVELS:
+            continue
+        times = target_times.get((row["zone"], row["code"]))
+        if not times:
+            continue
+        instant = timestamp(row["timestamp"])
+        index = bisect_left(times, instant)
+        # The nearest target fault must be the immediate predecessor or successor.
+        if any(abs(times[i] - instant) <= window
+               for i in (index - 1, index) if 0 <= i < len(times)):
+            nearby.append(row)
+    return nearby
+
+
 def diagnose(args):
     events = site_events(args.events, args.site, args.start, args.end)
     timeline = [row for row in events if row["device_id"] == args.device]
     faults = [row for row in timeline if row["severity"] in FAULT_LEVELS]
-    fault_locations = {(row["zone"], row["code"]) for row in faults}
-    nearby = [row for row in events if row["device_id"] != args.device
-              and row["severity"] in FAULT_LEVELS
-              and (row["zone"], row["code"]) in fault_locations]
+    nearby = find_peer_faults(events, faults, args.device, args.peer_window)
     counts = Counter(row["code"] for row in faults)
     report = {
         "device_id": args.device,
@@ -82,6 +130,7 @@ def diagnose(args):
         "fault_counts": dict(counts),
         "repeated_faults": {code: count for code, count in counts.items() if count > 1},
         "fault_job_ids": sorted({row["job_id"] for row in faults if row["job_id"]}),
+        "peer_window_seconds": int(args.peer_window.total_seconds()),
         "peer_faults": nearby,
         "timeline": timeline,
     }
@@ -148,9 +197,27 @@ def load_cases(path, fields_key):
     return indexed
 
 
-def validate(args):
-    plan = load_cases(args.plan, "expected")
-    evidence = load_cases(args.evidence, "observed")
+def check_observation_age(record, now, max_age):
+    if "observed_at" not in record:
+        return {"reason": "missing_observed_at"}
+    raw = record["observed_at"]
+    if not isinstance(raw, str):
+        return {"reason": "invalid_observed_at"}
+    try:
+        observed = timestamp(raw)
+    except argparse.ArgumentTypeError:
+        return {"reason": "invalid_observed_at"}
+    age = now - observed
+    if age < -CLOCK_SKEW:
+        return {"reason": "observed_in_future"}
+    if age > max_age:
+        return {"reason": "stale_observation", "age_seconds": age.total_seconds()}
+    return None
+
+
+def compare_cases(plan, evidence, max_age=None, now=None):
+    if max_age is not None and now is None:
+        now = datetime.now(timezone.utc)
     if not plan:
         raise ValueError("Validation plan must contain at least one case")
     results = []
@@ -171,6 +238,10 @@ def validate(args):
                 elif observed[field] != expected:
                     differences.append({"field": field, "expected": expected,
                                         "observed": observed[field]})
+            if max_age is not None:
+                problem = check_observation_age(record, now, max_age)
+                if problem is not None:
+                    differences.append(problem)
         results.append({"id": case_id, "kind": case["kind"],
                         "status": "FAIL" if differences else "PASS",
                         "differences": differences})
@@ -178,16 +249,25 @@ def validate(args):
         results.append({"id": case_id, "kind": evidence[case_id]["kind"],
                         "status": "FAIL", "differences": [{"reason": "unexpected_observation"}]})
     failed = sum(result["status"] == "FAIL" for result in results)
-    return {"passed": len(results) - failed, "failed": failed, "cases": results}, int(failed > 0)
+    return {"passed": len(results) - failed, "failed": failed, "cases": results}
+
+
+def validate(args):
+    report = compare_cases(
+        load_cases(args.plan, "expected"), load_cases(args.evidence, "observed"),
+        max_age=args.max_age, now=args.now,
+    )
+    return report, int(report["failed"] > 0)
 
 
 def simulate(args):
     """Run the simulator, then process its exports using the usual CLI logic."""
     plan = Path(__file__).resolve().parent / "demo" / "release-plan.json"
-    fleet = SimulatedFleet(args.scenario)
+    faults_enabled = SCENARIOS[args.scenario] | frozenset(args.inject)
+    fleet = SimulatedFleet(faults_enabled)
     fleet.run()
     output = args.output
-    output.mkdir(exist_ok=False)
+    output.mkdir(parents=True, exist_ok=False)
     events = output / "events.csv"
     evidence = output / "evidence.json"
 
@@ -198,12 +278,13 @@ def simulate(args):
         writer = csv.DictWriter(stream, fieldnames=EVENT_FIELDS)
         writer.writeheader()
         writer.writerows(fleet.events)
-    write_json(evidence, {"scenario": args.scenario, "cases": fleet.observations})
+    write_json(evidence, {"scenario": args.scenario, "faults_injected": sorted(faults_enabled),
+                          "cases": fleet.observations})
     diagnostics, _ = diagnose(argparse.Namespace(
         events=events, device=TARGET, site=SITE, start=START, end=END,
-        csv=output / "incident.csv",
+        csv=output / "incident.csv", peer_window=PEER_WINDOW,
     ))
-    release, status = validate(argparse.Namespace(plan=plan, evidence=evidence))
+    release = compare_cases(load_cases(plan, "expected"), load_cases(evidence, "observed"))
     window_events = site_events(events, SITE, START, END)
     faults = [event for event in window_events if event["severity"] in FAULT_LEVELS]
     window = {
@@ -217,12 +298,14 @@ def simulate(args):
     write_json(output / "validation.json", release)
     write_json(output / "fleet-window.json", window)
     report = output / "report.html"
-    report.write_text(render(args.scenario, diagnostics, release, window), encoding="utf-8")
+    report.write_text(render(args.scenario, diagnostics, release, window, args.tz),
+                      encoding="utf-8")
     return {
-        "scenario": args.scenario, "output_directory": str(output), "report": str(report),
+        "scenario": args.scenario, "faults_injected": sorted(faults_enabled),
+        "output_directory": str(output), "report": str(report),
         "target_faults": diagnostics["fault_count"], "peer_faults": len(diagnostics["peer_faults"]),
         "site_faults": window["fault_count"], "passed": release["passed"], "failed": release["failed"],
-    }, status
+    }, int(release["failed"] > 0)
 
 
 def main():
@@ -235,16 +318,28 @@ def main():
     diagnostics.add_argument("--start", required=True, type=timestamp)
     diagnostics.add_argument("--end", required=True, type=timestamp)
     diagnostics.add_argument("--csv", type=Path, help="Create a timeline CSV at this path")
+    diagnostics.add_argument("--peer-window", type=duration, default=PEER_WINDOW,
+                             help="Maximum time gap for a peer fault (default: 15m)")
     diagnostics.set_defaults(run=diagnose)
     validation = commands.add_parser("validate", help="Compare a release plan and evidence")
     validation.add_argument("--plan", required=True, type=Path)
     validation.add_argument("--evidence", required=True, type=Path)
+    validation.add_argument("--max-age", type=duration,
+                            help="Maximum age of staging evidence, for example 30m")
+    validation.add_argument("--now", type=timestamp,
+                            help="Reference time for --max-age (default: current time)")
     validation.set_defaults(run=validate)
     simulation = commands.add_parser("simulate", help="Run the offline fleet staging demo")
     simulation.add_argument("--scenario", choices=("baseline", "regression"), default="baseline")
     simulation.add_argument("--output", required=True, type=Path, help="New directory for run outputs")
+    simulation.add_argument("--inject", choices=FAULTS, action="append", default=[],
+                            help="Add a named fault to the scenario (repeatable)")
+    simulation.add_argument("--tz", type=reporting_zone, default=timezone.utc,
+                            help="Time zone for the report, for example America/Chicago (default: UTC)")
     simulation.set_defaults(run=simulate)
     args = parser.parse_args()
+    if args.command == "validate" and args.now is not None and args.max_age is None:
+        parser.error("--now requires --max-age")
     try:
         report, status = args.run(args)
     except (OSError, ValueError, csv.Error) as error:

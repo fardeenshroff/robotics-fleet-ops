@@ -11,12 +11,11 @@ Download the example HTML from GitHub and open it in a browser to see the incide
 ```bash
 git clone https://github.com/fardeenshroff/robotics-fleet-ops.git
 cd robotics-fleet-ops
-mkdir -p reports
 python fleet_ops.py simulate --scenario baseline --output reports/baseline
 python fleet_ops.py simulate --scenario regression --output reports/regression
 ```
 
-Open `reports/regression/report.html` to review the results. Each run requires a fresh output directory. The regression run writes all reports before returning exit code `1`.
+Open `reports/regression/report.html` to review the results. Each run creates the output directory and its parents. Use a fresh run directory each time. The regression run writes all reports before returning exit code `1`.
 
 | Scenario | Checks passed | Checks failed | Exit code |
 | --- | ---: | ---: | ---: |
@@ -35,6 +34,15 @@ Open `reports/regression/report.html` to review the results. Each run requires a
 | JOB-902 with the eligible robot offline | Job queued with no robot assigned | Job assigned to AMR-205 |
 | WS-22 onboarding | Telemetry received | Telemetry missing |
 
+### Reproduce one failure
+
+```bash
+python fleet_ops.py simulate --inject firmware_not_applied --tz America/Chicago \
+  --output reports/firmware-only
+```
+
+This run fails only the firmware check. Repeat `--inject` to combine faults. Options include `firmware_not_applied`, `dispatch_ignores_status`, and `workstation_no_telemetry`. Reports use UTC by default. Named zones use IANA time-zone data and follow daylight-saving changes. On systems without that data, install `tzdata` to use named zones.
+
 ## Commands and input formats
 
 ### Diagnose a fleet export
@@ -44,7 +52,7 @@ python fleet_ops.py diagnose --events demo/events.csv --device AMR-205 --site RI
   --start 2026-11-25T14:00:00Z --end 2026-11-25T15:00:00Z --csv reports/incident.csv
 ```
 
-Use the column order in [the example CSV](demo/events.csv). Only `job_id` and `message` may be blank. The start time is inclusive, the end time is exclusive, and timestamps must include an offset. The CLI counts `ERROR` and `CRITICAL` events as faults. A peer match shares the target fault's site, zone, code, and reporting window. The JSON includes those matches, and the CSV contains the target robot's timeline.
+Use the column order in [the example CSV](demo/events.csv). Only `job_id` and `message` may be blank. The start time is inclusive, the end time is exclusive, and timestamps must include an offset. The CLI counts `ERROR` and `CRITICAL` events as faults. A peer match shares the target fault's site, zone, and code, and occurs within 15 minutes of a target fault by default. Set `--peer-window 5m` to tighten the correlation window. Exports are loaded into memory. The JSON includes those matches, and the CSV contains the target robot's timeline.
 
 ### Validate staging evidence
 
@@ -53,6 +61,15 @@ python fleet_ops.py validate --plan demo/release-plan.json --evidence demo/relea
 ```
 
 Use the [release plan](demo/release-plan.json) for expected fields and the [passing evidence file](demo/release-pass.json) for the observation format. Cases match by unique ID and check type. Use JSON booleans for connectivity and telemetry, and `null` for an unassigned robot or omitted registration site. Missing cases, missing fields, unexpected observations, and mismatched values fail validation.
+
+To reject old evidence, add `--max-age`. The following replays the synthetic baseline relative to a fixed demo time.
+
+```bash
+python fleet_ops.py validate --plan demo/release-plan.json --evidence reports/baseline/evidence.json \
+  --max-age 10m --now 2026-11-25T15:05:00Z
+```
+
+When enabled, the check rejects stale evidence, missing or invalid `observed_at` values, and timestamps more than one minute ahead of the reference time. The reference defaults to the current time. Without `--max-age`, archived evidence can still be validated by field values alone.
 
 | Exit code | Meaning |
 | --- | --- |
@@ -94,6 +111,6 @@ flowchart TD
 python -m unittest discover -s tests -v
 ```
 
-The [CI workflow](.github/workflows/ci.yml) runs the suite on Python 3.10, 3.12, and 3.14. Live integration would require a fleet adapter and access to a staging system. Keep real fleet exports outside the repository.
+The [CI workflow](.github/workflows/ci.yml) runs the suite on Python 3.10, 3.12, and 3.14. The Python 3.12 job generates both simulation reports, adds the counts to the run summary, and uploads the reports in a `fleet-reports` artifact. Live integration would require a fleet adapter and access to a staging system. Keep real fleet exports outside the repository.
 
 [MIT license](LICENSE)

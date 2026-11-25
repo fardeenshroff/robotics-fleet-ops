@@ -44,10 +44,10 @@ class FleetOpsTests(unittest.TestCase):
             self.run_cli(2, *arguments)
             self.assertEqual(target.read_bytes(), original)
 
-    def validate(self, exit_code, evidence):
+    def validate(self, exit_code, evidence, *options):
         return self.run_cli(
             exit_code, "validate", "--plan", DEMO / "release-plan.json",
-            "--evidence", evidence,
+            "--evidence", evidence, *options,
         )
 
     def test_complete_release_passes(self):
@@ -127,6 +127,56 @@ class FleetOpsTests(unittest.TestCase):
                         self.assertEqual(len(list(csv.DictReader(stream))), 4)
                     self.run_cli(2, "simulate", "--scenario", scenario, "--output", output)
                     self.assertEqual((output / "report.html").read_text(encoding="utf-8"), report)
+
+
+    def test_each_injected_fault_fails_only_its_own_case(self):
+        faults = {
+            "firmware_not_applied": "firmware-amr-205",
+            "dispatch_ignores_status": "queue-offline",
+            "workstation_no_telemetry": "onboard-workstation",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            for fault, case_id in faults.items():
+                with self.subTest(fault=fault):
+                    output = Path(directory) / "reports" / fault
+                    self.run_cli(1, "simulate", "--inject", fault, "--output", output)
+                    data = json.loads((output / "validation.json").read_text(encoding="utf-8"))
+                    self.assertEqual([case["id"] for case in data["cases"]
+                                      if case["status"] == "FAIL"], [case_id])
+                    evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
+                    self.assertEqual(evidence["faults_injected"], [fault])
+
+    def test_freshness_detects_stale_future_missing_and_invalid_timestamps(self):
+        content = json.loads((DEMO / "release-pass.json").read_text(encoding="utf-8"))
+        for case in content["cases"]:
+            case["observed_at"] = "2026-11-25T15:00:00Z"
+        options = ("--max-age", "10m", "--now", "2026-11-25T15:10:00Z")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "checked.json"
+            path.write_text(json.dumps(content), encoding="utf-8")
+            self.assertEqual(json.loads(self.validate(0, path, *options).stdout)["passed"], 10)
+
+            content["cases"][0]["observed_at"] = "2026-11-25T14:59:59Z"
+            content["cases"][1]["observed_at"] = "2026-11-25T15:11:01Z"
+            del content["cases"][2]["observed_at"]
+            content["cases"][3]["observed_at"] = "2026-11-25T15:00:00"
+            path.write_text(json.dumps(content), encoding="utf-8")
+            report = json.loads(self.validate(1, path, *options).stdout)
+        self.assertEqual(report["passed"], 6)
+        self.assertEqual([case["differences"][0]["reason"] for case in report["cases"][:4]], [
+            "stale_observation", "observed_in_future", "missing_observed_at", "invalid_observed_at",
+        ])
+
+    def test_peer_window_includes_the_exact_boundary(self):
+        arguments = (
+            "diagnose", "--events", DEMO / "events.csv", "--device", "AMR-205",
+            "--site", "RI-01", "--start", "2026-11-25T14:00:00Z",
+            "--end", "2026-11-25T15:00:00Z", "--peer-window",
+        )
+        for window, count in (("488s", 0), ("489s", 1), ("15m", 1)):
+            with self.subTest(window=window):
+                report = json.loads(self.run_cli(0, *arguments, window).stdout)
+                self.assertEqual(len(report["peer_faults"]), count)
 
 
 if __name__ == "__main__":
