@@ -11,7 +11,8 @@ import re
 import sys
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fleet_report import render
+from fleet_exercises import EXERCISES, ExerciseRun
+from fleet_report import render, render_exercise, render_exercise_index
 from fleet_simulator import END, FAULTS, SCENARIOS, SITE, START, TARGET, SimulatedFleet
 
 
@@ -158,6 +159,10 @@ CHECKS = {
     "assignment": {
         "job_id": str, "state": str, "assigned_device": (str, type(None)),
     },
+    "route": {
+        "job_id": str, "state": str, "assigned_device": (str, type(None)),
+        "route": (str, type(None)),
+    },
     "onboarding": {
         "device_id": str, "device_type": str, "visible_in_monitoring": bool,
         "telemetry_received": bool, "smoke_status": str,
@@ -260,6 +265,55 @@ def validate(args):
     return report, int(report["failed"] > 0)
 
 
+def write_json(path, data):
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def write_events(path, events):
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=EVENT_FIELDS)
+        writer.writeheader()
+        writer.writerows(events)
+
+
+def exercise(args):
+    names = tuple(EXERCISES) if args.scenario == "all" else (args.scenario,)
+    output = args.output
+    output.mkdir(parents=True, exist_ok=False)
+    results = []
+    for name in names:
+        spec = EXERCISES[name]
+        run = ExerciseRun(spec)
+        run.run()
+        path = output / name
+        path.mkdir()
+
+        plan_path = path / "plan.json"
+        evidence_path = path / "evidence.json"
+        write_events(path / "events.csv", run.events)
+        write_json(plan_path, {"cases": run.plan})
+        write_json(evidence_path, {"cases": run.evidence})
+        validation = compare_cases(load_cases(plan_path, "expected"),
+                                   load_cases(evidence_path, "observed"))
+        metrics = run.metrics()
+        write_json(path / "validation.json", validation)
+        write_json(path / "job-metrics.json", metrics)
+        (path / "report.html").write_text(
+            render_exercise(spec, run.events, validation, metrics, START), encoding="utf-8",
+        )
+        results.append({
+            "scenario": name, "title": spec.title,
+            "passed": validation["passed"], "failed": validation["failed"],
+            "jobs_completed": sum(job["final_state"] == "completed" for job in metrics),
+            "report": f"{name}/report.html",
+        })
+    (output / "index.html").write_text(render_exercise_index(results), encoding="utf-8")
+    report = {"scenarios": results, "passed": sum(row["passed"] for row in results),
+              "failed": sum(row["failed"] for row in results), "index": str(output / "index.html")}
+    write_json(output / "summary.json", report)
+    return report, int(report["failed"] > 0)
+
+
 def simulate(args):
     """Run the simulator, then process its exports using the usual CLI logic."""
     plan = Path(__file__).resolve().parent / "demo" / "release-plan.json"
@@ -271,13 +325,7 @@ def simulate(args):
     events = output / "events.csv"
     evidence = output / "evidence.json"
 
-    def write_json(path, data):
-        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-    with events.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=EVENT_FIELDS)
-        writer.writeheader()
-        writer.writerows(fleet.events)
+    write_events(events, fleet.events)
     write_json(evidence, {"scenario": args.scenario, "faults_injected": sorted(faults_enabled),
                           "cases": fleet.observations})
     diagnostics, _ = diagnose(argparse.Namespace(
@@ -337,6 +385,10 @@ def main():
     simulation.add_argument("--tz", type=reporting_zone, default=timezone.utc,
                             help="Time zone for the report, for example America/Chicago (default: UTC)")
     simulation.set_defaults(run=simulate)
+    exercises = commands.add_parser("exercise", help="Run documented fleet disruption exercises")
+    exercises.add_argument("--scenario", choices=("all", *EXERCISES), default="all")
+    exercises.add_argument("--output", required=True, type=Path, help="New directory for exercise outputs")
+    exercises.set_defaults(run=exercise)
     args = parser.parse_args()
     if args.command == "validate" and args.now is not None and args.max_age is None:
         parser.error("--now requires --max-age")

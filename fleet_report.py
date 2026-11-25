@@ -88,13 +88,14 @@ def describe_difference(diff):
 
 def render(scenario, diagnostics, release, shift, zone=timezone.utc):
     labels = {"firmware": "Firmware", "registration": "Registration",
-              "assignment": "Job assignment", "onboarding": "Onboarding"}
+              "assignment": "Job assignment", "onboarding": "Onboarding", "route": "Route"}
     statuses = Counter((case["kind"], case["status"]) for case in release["cases"])
     totals = [statuses[kind, "PASS"] + statuses[kind, "FAIL"] for kind in labels]
     release_chart = "".join(
         bar(label, [("passed", statuses[kind, "PASS"], "pass"),
                     ("failed", statuses[kind, "FAIL"], "fail")], max(1, *totals))
         for kind, label in labels.items()
+        if statuses[kind, "PASS"] or statuses[kind, "FAIL"]
     )
     fault_chart = "".join(
         bar(zone, [("faults", count, "count")], shift["fault_count"])
@@ -130,3 +131,54 @@ def render(scenario, diagnostics, release, shift, zone=timezone.utc):
 <section><h2>Release validation by area</h2>{release_chart}</section>
 <section><h2>Case results</h2>{results}</section></main></body></html>
 """
+
+
+def exercise_page(title, description, sections):
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{escape(title)} | Robotics Fleet Ops</title><style>{STYLES}</style></head>
+<body><main><header><h1>{escape(title)}</h1><p class="meta">{escape(description)}</p></header>
+{sections}</main></body></html>
+"""
+
+
+def render_exercise_index(results):
+    return exercise_page("Fleet disruption exercises", "Synthetic warehouse operations replay", "".join(
+        f'<section><h2><a href="{escape(row["report"], quote=True)}">{escape(row["title"])}</a></h2>'
+        f'<p>{row["passed"]} checks passed, {row["failed"]} failed. '
+        f'{row["jobs_completed"]} jobs completed.</p></section>'
+        for row in results
+    ))
+
+
+def render_exercise(spec, events, validation, metrics, start):
+    times = table(("Elapsed seconds", "Device", "Zone", "Event", "Job", "Detail"), (
+        (int((datetime.fromisoformat(row["timestamp"]) - start).total_seconds()), row["device_id"],
+         row["zone"], row["code"], row["job_id"] or "—", row["message"] or "—")
+        for row in events
+    ))
+    jobs = table(("Job", "Final state", "Robot", "Route", "Queue wait (s)",
+                  "Reassignment (s)", "Time to complete (s)"), (
+        (job["job_id"], job["final_state"], job["assigned_device"] or "—", job["route"] or "—",
+         *[job[key] if job[key] is not None else "—"
+           for key in ("queue_seconds", "reassignment_seconds", "elapsed_seconds")])
+        for job in metrics
+    ))
+    completed = [job for job in metrics if job["elapsed_seconds"] is not None]
+    scale = max([1, *(job["elapsed_seconds"] for job in completed)])
+    chart = "".join(bar(job["job_id"], [("s", job["elapsed_seconds"], "count")], scale)
+                    for job in completed)
+    checks = table(("Check", "Result", "Expected → observed"), (
+        (case["id"], case["status"],
+         " | ".join(describe_difference(diff) for diff in case["differences"]) or "All fields matched")
+        for case in validation["cases"]
+    ))
+    sources = "".join(f'<li><a href="{escape(url, quote=True)}">{escape(label)}</a></li>'
+                      for label, url in spec.sources)
+    return exercise_page(spec.title, spec.description, f"""
+<section><h2>Job timing</h2><p>Bars show the time from job arrival to completion.</p>{chart}{jobs}</section>
+<section><h2>Release checks</h2><p>{validation["passed"]} passed, {validation["failed"]} failed.</p>{checks}</section>
+<section><h2>Event timeline</h2>{times}</section>
+<section><h2>Source references</h2><p>These references inform the operating conditions. The event
+times, job IDs, policies, and outcomes are synthetic.</p><ul>{sources}</ul></section>
+""")

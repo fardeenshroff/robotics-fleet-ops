@@ -43,6 +43,14 @@ python fleet_ops.py simulate --inject firmware_not_applied --tz America/Chicago 
 
 This run fails only the firmware check. Repeat `--inject` to combine faults. Options include `firmware_not_applied`, `dispatch_ignores_status`, and `workstation_no_telemetry`. Reports use UTC by default. Named zones use IANA time-zone data and follow daylight-saving changes. On systems without that data, install `tzdata` to use named zones.
 
+## Warehouse disruption exercises
+
+```bash
+python fleet_ops.py exercise --output reports/fleet-exercises
+```
+
+Open the generated `index.html` for five research-backed scenarios. Each report includes the event timeline, a job timing chart, and the result of each checkpoint. Use `--scenario` to select a single exercise. The [scenario guide](docs/fleet-exercises.md) documents the operating references, assumptions, and replay commands.
+
 ## Commands and input formats
 
 ### Diagnose a fleet export
@@ -111,6 +119,6 @@ flowchart TD
 python -m unittest discover -s tests -v
 ```
 
-The [CI workflow](.github/workflows/ci.yml) runs the suite on Python 3.10, 3.12, and 3.14. The Python 3.12 job generates both simulation reports, adds the counts to the run summary, and uploads the reports in a `fleet-reports` artifact. Live integration would require a fleet adapter and access to a staging system. Keep real fleet exports outside the repository.
+The [CI workflow](.github/workflows/ci.yml) runs the suite on Python 3.10, 3.12, and 3.14. The Python 3.12 job generates the simulation and disruption reports, adds the counts to the run summary, and uploads the reports in a `fleet-reports` artifact. Live integration would require a fleet adapter and access to a staging system. Keep real fleet exports outside the repository.
 
 [MIT license](LICENSE)
