@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robotics Fleet Ops | Regression run</title><style>
+:root{color-scheme:light;--ink:#142641;--muted:#485d77;--line:#d9e3ee;
+      --teal:#126c61;--red:#a33134;--blue:#2e5b9a}
+*{box-sizing:border-box}body{margin:0;background:#f1f5fa;color:var(--ink);
+  font:16px/1.55 system-ui,sans-serif}main{max-width:1060px;margin:auto;padding:46px 22px 55px}
+header{margin-bottom:22px}h1{font-size:clamp(29px,5vw,45px);line-height:1.1;margin:0 0 10px}
+h2{font-size:21px;margin:0 0 8px}p{margin:7px 0 12px}.meta{color:var(--muted)}
+section{margin:16px 0;padding:20px;background:#fff;border:1px solid var(--line);border-radius:12px}
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.summary div{padding:11px 14px;background:#edf3f9;border-radius:8px}.summary strong{display:block;font-size:25px}
+.chart-row{display:grid;grid-template-columns:125px minmax(150px,1fr) minmax(90px,auto);
+  gap:10px;align-items:center;margin:8px 0}
+.track{display:flex;background:#edf3f9;border-radius:4px;height:22px;overflow:hidden}
+.pass,.fail,.count{display:block;height:100%}.pass{background:var(--teal)}
+.fail{background:var(--red)}.count{background:var(--blue)}
+.timeline-row,.axis-row{display:grid;grid-template-columns:86px minmax(0,1fr);
+  gap:10px;align-items:center;margin:9px 0}
+.timeline-track{position:relative;height:24px;border-bottom:1px solid #b5c4d5;
+  background:repeating-linear-gradient(to right, #e5edf5 0 1px, transparent 1px 16.6667%);
+  margin:0 8px}
+.marker{position:absolute;top:5px;width:13px;height:13px;border:2px solid #fff;
+  border-radius:50%;background:var(--blue);transform:translateX(-50%);box-shadow:0 0 0 1px #aebed0}
+.marker.error,.marker.critical{background:var(--red);border-radius:2px;transform:translateX(-50%) rotate(45deg)}
+.axis-row div{display:flex;justify-content:space-between;font-size:.78rem;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:.91rem}
+td,th{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px 10px}
+th{background:#edf3f9}.table{overflow:auto}code{font-family:ui-monospace,monospace}
+@media(max-width:560px){.chart-row{grid-template-columns:1fr}.chart-row{gap:3px;margin-bottom:12px}}
+</style></head>
+<body><main><header><h1>Robotics Fleet Ops</h1>
+<p class="meta">Regression simulation · RI-01 · Synthetic fleet data</p></header>
+<section class="summary" aria-label="Run summary">
+<div><strong>3</strong>Target robot faults</div>
+<div><strong>1</strong>Matching peer events</div>
+<div><strong>7</strong>Checks passed</div>
+<div><strong>3</strong>Checks failed</div></section>
+<section><h2>Fleet faults by zone</h2><p>7 events and 5 faults at this site on November 25, 2026, from 08:00 to 09:00 CST.</p><div class="chart-row"><strong>Zone C</strong><div class="track" aria-hidden="true"><span class="count" style="width:80.000%"></span></div><span>4 faults</span></div><div class="chart-row"><strong>Zone A</strong><div class="track" aria-hidden="true"><span class="count" style="width:20.000%"></span></div><span>1 faults</span></div></section>
+<section><h2>Diagnostic timeline</h2><p>AMR-205 events and matching same-zone faults on peer robots. Red diamonds mark faults. Blue circles mark information events.</p><div aria-hidden="true"><div class="timeline-row"><strong>AMR-205</strong><div class="timeline-track"><span class="marker info" style="left:0.0000%" title="JOB_STARTED · JOB-801"></span><span class="marker error" style="left:5.3333%" title="FRONT_SCANNER_FIELD_OCCUPIED · JOB-801"></span><span class="marker error" style="left:20.0000%" title="FRONT_SCANNER_FIELD_OCCUPIED · JOB-803"></span><span class="marker error" style="left:55.0000%" title="FRONT_SCANNER_FIELD_OCCUPIED · JOB-805"></span></div></div><div class="timeline-row"><strong>AMR-207</strong><div class="timeline-track"><span class="marker error" style="left:33.5833%" title="FRONT_SCANNER_FIELD_OCCUPIED · JOB-804"></span></div></div><div class="axis-row"><span></span><div><span>08:00</span><span>08:10</span><span>08:20</span><span>08:30</span><span>08:40</span><span>08:50</span><span>09:00</span></div></div></div><div class="table"><table><thead><tr><th scope="col">CST</th><th scope="col">Device</th><th scope="col">Zone</th><th scope="col">Event</th><th scope="col">Job</th></tr></thead><tbody><tr><td>08:00:00</td><td>AMR-205</td><td>Zone C</td><td>JOB_STARTED</td><td>JOB-801</td></tr><tr><td>08:03:12</td><td>AMR-205</td><td>Zone C</td><td>FRONT_SCANNER_FIELD_OCCUPIED</td><td>JOB-801</td></tr><tr><td>08:12:00</td><td>AMR-205</td><td>Zone C</td><td>FRONT_SCANNER_FIELD_OCCUPIED</td><td>JOB-803</td></tr><tr><td>08:20:09</td><td>AMR-207</td><td>Zone C</td><td>FRONT_SCANNER_FIELD_OCCUPIED</td><td>JOB-804</td></tr><tr><td>08:33:00</td><td>AMR-205</td><td>Zone C</td><td>FRONT_SCANNER_FIELD_OCCUPIED</td><td>JOB-805</td></tr></tbody></table></div></section>
+<section><h2>Release validation by area</h2><div class="chart-row"><strong>Firmware</strong><div class="track" aria-hidden="true"><span class="pass" style="width:0.000%"></span><span class="fail" style="width:33.333%"></span></div><span>0 passed / 1 failed</span></div><div class="chart-row"><strong>Registration</strong><div class="track" aria-hidden="true"><span class="pass" style="width:100.000%"></span><span class="fail" style="width:0.000%"></span></div><span>3 passed / 0 failed</span></div><div class="chart-row"><strong>Job assignment</strong><div class="track" aria-hidden="true"><span class="pass" style="width:66.667%"></span><span class="fail" style="width:33.333%"></span></div><span>2 passed / 1 failed</span></div><div class="chart-row"><strong>Onboarding</strong><div class="track" aria-hidden="true"><span class="pass" style="width:66.667%"></span><span class="fail" style="width:33.333%"></span></div><span>2 passed / 1 failed</span></div></section>
+<section><h2>Case results</h2><div class="table"><table><thead><tr><th scope="col">Check</th><th scope="col">Area</th><th scope="col">Result</th><th scope="col">Expected → observed</th></tr></thead><tbody><tr><td>firmware-amr-205</td><td>Firmware</td><td>FAIL</td><td>version: &#x27;2.8.1&#x27; → &#x27;2.8.0&#x27;</td></tr><tr><td>register-sensor</td><td>Registration</td><td>PASS</td><td>All fields matched</td></tr><tr><td>reject-duplicate-id</td><td>Registration</td><td>PASS</td><td>All fields matched</td></tr><tr><td>reject-missing-site</td><td>Registration</td><td>PASS</td><td>All fields matched</td></tr><tr><td>assign-available</td><td>Job assignment</td><td>PASS</td><td>All fields matched</td></tr><tr><td>queue-offline</td><td>Job assignment</td><td>FAIL</td><td>state: &#x27;queued&#x27; → &#x27;assigned&#x27; | assigned_device: None → &#x27;AMR-205&#x27;</td></tr><tr><td>reassign-interrupted</td><td>Job assignment</td><td>PASS</td><td>All fields matched</td></tr><tr><td>onboard-robot</td><td>Onboarding</td><td>PASS</td><td>All fields matched</td></tr><tr><td>onboard-sensor</td><td>Onboarding</td><td>PASS</td><td>All fields matched</td></tr><tr><td>onboard-workstation</td><td>Onboarding</td><td>FAIL</td><td>telemetry_received: True → False</td></tr></tbody></table></div></section></main></body></html>
